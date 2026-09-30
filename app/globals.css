@@ -27,8 +27,34 @@ body {
 }
 
 .meal-planner__header {
-  max-width: 640px;
   margin-bottom: 40px;
+}
+
+.meal-planner__topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.meal-planner__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.profile-link {
+  color: #425248;
+  font-size: 0.9rem;
+  text-decoration: none;
+}
+
+.profile-link:hover {
+  text-decoration: underline;
+}
+
+.meal-planner__topline .meal-planner__eyebrow {
+  margin-bottom: 10px;
 }
 
 .meal-planner__eyebrow {
@@ -38,6 +64,11 @@ body {
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
+}
+
+.meal-planner__header h1,
+.meal-planner__header .meal-planner__intro {
+  max-width: 640px;
 }
 
 .meal-planner h1,
@@ -123,6 +154,162 @@ body {
   margin-bottom: 0;
 }
 
+.auth-gate {
+  max-width: 540px;
+  padding: 32px;
+  background: #fffefa;
+  border: 1px solid #e4e1d8;
+  border-radius: 14px;
+  box-shadow: 0 3px 12px rgb(33 45 38 / 5%);
+}
+
+.auth-gate h2 {
+  margin-bottom: 8px;
+  color: #26362e;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.65rem;
+  font-weight: 500;
+}
+
+.auth-gate p {
+  margin-bottom: 24px;
+  color: #637068;
+  line-height: 1.5;
+}
+
+.auth-gate__notice {
+  margin-bottom: 0 !important;
+}
+
+.profile-completion,
+.profile-form {
+  max-width: 640px;
+  margin-bottom: 32px;
+  padding: 28px;
+  background: #fffefa;
+  border: 1px solid #e4e1d8;
+  border-radius: 14px;
+  box-shadow: 0 3px 12px rgb(33 45 38 / 5%);
+}
+
+.profile-completion h2 {
+  margin-bottom: 8px;
+  color: #26362e;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.65rem;
+  font-weight: 500;
+}
+
+.profile-completion > p {
+  margin-bottom: 22px;
+  color: #637068;
+  line-height: 1.5;
+}
+
+.profile-form__fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.profile-form label,
+.profile-completion label {
+  display: grid;
+  gap: 7px;
+  color: #425248;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.profile-form input,
+.profile-completion input {
+  width: 100%;
+  padding: 10px 11px;
+  background: #fff;
+  border: 1px solid #c8cdc5;
+  border-radius: 6px;
+  color: #26362e;
+  font: inherit;
+}
+
+.profile-photo {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 24px;
+}
+
+.profile-photo__image,
+.profile-photo__placeholder {
+  width: 82px;
+  height: 82px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
+.profile-photo__image {
+  object-fit: cover;
+}
+
+.profile-photo__placeholder {
+  display: grid;
+  place-items: center;
+  background: #dfe7dc;
+  color: #425248;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 2rem;
+}
+
+.profile-form input[type="file"] {
+  padding: 7px 0;
+  border: 0;
+}
+
+.profile-form__hint,
+.profile-form__message {
+  margin: 8px 0 0;
+  color: #637068;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.profile-form__message {
+  color: #425248;
+}
+
+.profile-save-button {
+  margin-top: 20px;
+  padding: 10px 14px;
+  background: #425248;
+  border: 1px solid #425248;
+  border-radius: 6px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.profile-save-button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.sign-out-button {
+  padding: 7px 10px;
+  appearance: none;
+  background: transparent;
+  border: 1px solid #c8cdc5;
+  border-radius: 6px;
+  color: #425248;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.86rem;
+}
+
+.sign-out-button:hover {
+  background: #eef0eb;
+}
+
 @media (max-width: 600px) {
   .meal-planner {
     padding: 40px 18px 56px;
@@ -135,5 +322,9 @@ body {
   .recipe-card {
     min-height: 166px;
     padding: 22px;
+  }
+
+  .profile-form__fields {
+    grid-template-columns: 1fr;
   }
 }
