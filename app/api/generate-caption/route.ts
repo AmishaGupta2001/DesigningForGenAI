@@ -149,9 +149,13 @@ ${creativeDirection}`,
               ],
             },
           ],
-          generationConfig: {
-            temperature: 1,
-            maxOutputTokens: 100,
+            generationConfig: {
+                temperature: 1,
+                maxOutputTokens: 300,
+                thinkingConfig: {
+                    thinkingLevel: "low",
+
+            },
           },
         }),
       },
