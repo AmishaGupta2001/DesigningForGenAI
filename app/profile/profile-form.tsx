@@ -117,16 +117,13 @@ export default function ProfileForm({
       }
 
       const { error } = await supabase
-        .from("profiles")
-        .upsert(
-          {
-            id: user.id,
-            first_name: trimmedFirstName,
-            last_name: trimmedLastName,
-            avatar_url: nextAvatarUrl,
-          },
-          { onConflict: "id" },
-        );
+  	.from("profiles")
+  	.update({
+    	first_name: trimmedFirstName,
+    	last_name: trimmedLastName,
+    	avatar_url: nextAvatarUrl,
+ 	 })
+  	.eq("id", user.id);
 
       if (error) {
         throw error;

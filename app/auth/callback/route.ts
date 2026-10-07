@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
   }
 
   const response = NextResponse.redirect(
-    new URL("/recipes", request.url),
+    new URL("/", request.url),
     303,
   );
 

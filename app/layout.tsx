@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Meal Planner",
-  description: "Plan your week with recipe inspiration.",
+  title: "NYC Unhinged",
+  description: "AI captions for New York moments.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
