@@ -33,10 +33,63 @@ export async function proxy(request: NextRequest) {
     },
   });
 
-  await supabase.auth.getClaims();
+  const { data: claimsData, error: claimsError } =
+      await supabase.auth.getClaims();
+
+  const claims = claimsError ? null : claimsData?.claims;
+
+  const pathname = request.nextUrl.pathname;
+
+  const isAuthenticated = Boolean(claims);
+
+  const isRoot = pathname === "/";
+  const isProtectedRoute =
+      pathname === "/feed" ||
+      pathname.startsWith("/feed/") ||
+      pathname === "/create" ||
+      pathname.startsWith("/create/") ||
+      pathname === "/profile" ||
+      pathname.startsWith("/profile/");
+
+  if (isRoot || isProtectedRoute) {
+    if (!isAuthenticated) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/sign-in";
+      url.search = "";
+
+      const redirectResponse = NextResponse.redirect(url);
+
+      supabaseResponse.cookies.getAll().forEach((cookie) => {
+        redirectResponse.cookies.set(cookie);
+      });
+
+      return redirectResponse;
+    }
+
+    if (isRoot) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/feed";
+      url.search = "";
+
+      const redirectResponse = NextResponse.redirect(url);
+
+      supabaseResponse.cookies.getAll().forEach((cookie) => {
+        redirectResponse.cookies.set(cookie);
+      });
+
+      return redirectResponse;
+    }
+  }
+
   return supabaseResponse;
 }
 
 export const config = {
-  matcher: ["/recipes/:path*", "/profile/:path*"],
+  matcher: [
+    "/",
+    "/feed/:path*",
+    "/create/:path*",
+    "/profile/:path*",
+    "/recipes/:path*",
+  ],
 };

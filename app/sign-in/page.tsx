@@ -19,7 +19,7 @@ export default function SignInPage() {
         <h1 id="sign-in-title">Get unhinged with NYC.</h1>
         <p>Sign in to build your profile, save your favorite moments, and add your own city lore.</p>
         <GoogleSignIn />
-        <Link className="unhinged-auth__back" href="/">← Back to the feed</Link>
+
       </section>
     </main>
   );
