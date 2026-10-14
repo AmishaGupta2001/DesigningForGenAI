@@ -595,21 +595,8 @@ body { background:var(--bg); color:var(--ink); }
 :root { --shadow: 0 10px 30px rgb(31 22 61 / 8%); }
 .app-header { justify-content:space-between; gap:16px; }
 .header-actions { margin-left:auto; }
-.app-shell {
-  display: grid;
-  grid-template-columns: 194px minmax(0, 680px) 216px;
-  column-gap: 28px;
-  justify-content: center;
-  width: 100%;
-  max-width: none;
-  margin: 0;
-}
-.app-header {
-  grid-column: 1 / -1;
-  width: 100vw;
-  margin-left: calc(50% - 50vw);
-  border-radius: 0;
-}
+.app-shell { display:grid; grid-template-columns:194px minmax(0,680px) 216px; column-gap:28px; justify-content:center; }
+.app-header { grid-column:1 / -1; }
 .social-layout { grid-column:2 / -1; grid-template-columns:minmax(0,680px) 216px; gap:28px; width:100%; margin:0; align-items:start; }
 .left-nav { position:sticky; top:88px; left:auto; width:auto; grid-column:1; padding-top:24px; }
 .unhinged-shell .left-nav { position:fixed; top:92px; left:max(20px,calc((100% - 1280px)/2)); width:194px; padding-top:0; }

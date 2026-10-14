@@ -178,7 +178,7 @@ export default function CreateForm() {
     }
   }
 
-  return <main className="app-shell unhinged-shell">
+  return <main className="unhinged-shell">
     <NycUnhingedNav active="create" />
     <section className="create-heading" aria-labelledby="create-title"><p className="unhinged-kicker"><span aria-hidden="true">✦</span> YOUR IMAGE, AI-POWERED</p><h1 id="create-title">COOK SOMETHING</h1><p>{remixOf ? "Recook this moment with a fresh AI-generated caption." : "Turn a moment into something unhinged."}</p></section>
     <section className="create-grid">
