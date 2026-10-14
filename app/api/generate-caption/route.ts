@@ -192,13 +192,9 @@ ${creativeDirection}`,
       .trim();
 
     if (!caption) {
-  const finishReason = result.candidates?.[0]?.finishReason;
-
   return NextResponse.json(
     {
-      error: `Gemini returned no caption. Finish reason: ${
-        finishReason || "unknown"
-      }`,
+      error: "Gemini could not cook a caption. Please try again.",
     },
     { status: 502 },
   );
@@ -209,10 +205,7 @@ ${creativeDirection}`,
 
     return NextResponse.json(
       {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Unable to generate a caption.",
+        error: "Unable to generate a caption right now.",
       },
       { status: 500 },
     );

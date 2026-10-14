@@ -38,7 +38,7 @@ export default async function ProfilePage() {
           <p className="unhinged-kicker"><span aria-hidden="true">✦</span> YOUR CORNER OF THE CITY</p>
           <div>
             <div>
-              <h1 id="page-title">Your profile</h1>
+              <h1 id="page-title">YOUR PROFILE</h1>
               <p>Set the name and photo your fellow city lurkers will see.</p>
             </div>
             <form action="/auth/signout" method="post">
