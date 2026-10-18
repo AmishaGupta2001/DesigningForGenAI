@@ -9,6 +9,7 @@ const ALLOWED_TAGS = new Set([
   "studying", "dorm", "food", "restaurant", "party", "friends", "work",
   "phone", "traffic", "rain", "night",
 ]);
+const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
 function tagsFromGemini(text: string) {
   try {
@@ -38,8 +39,15 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const image = formData.get("image");
 
-    if (!(image instanceof File) || !image.type.startsWith("image/") || image.size > 10 * 1024 * 1024) {
+    if (!(image instanceof File) || image.size > 10 * 1024 * 1024) {
       return NextResponse.json({ error: "Unable to analyze that image." }, { status: 400 });
+    }
+
+    if (!SUPPORTED_IMAGE_TYPES.has(image.type)) {
+      return NextResponse.json(
+        { error: "Please upload a JPG, PNG, WebP, or GIF." },
+        { status: 400 },
+      );
     }
 
     const geminiKey = process.env.GEMINI_API_KEY;

@@ -1,16 +1,18 @@
 "use client";
-/* eslint-disable @next/next/no-img-element */
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import NycUnhingedNav from "../nyc-unhinged-nav";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
+import ImageWithFallback from "../components/ImageWithFallback";
 
 type ImageInput = { id: string; image_url: string; title: string; tags: string[] };
 type UploadAnalysis = { tags: string[]; failed: boolean };
 
 const COMMON_FILTERS = ["happy", "sad", "irritated", "surprised", "confused", "nyc", "subway", "food", "college"];
 const MAX_TAG_LENGTH = 32;
+const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+const UNSUPPORTED_IMAGE_MESSAGE = "Please upload a JPG, PNG, WebP, or GIF.";
 
 export default function CreateForm() {
   const router = useRouter();
@@ -96,8 +98,16 @@ export default function CreateForm() {
   );
 
   async function uploadFile(file: File) {
-    if (!file.type.startsWith("image/")) throw new Error("Please choose an image file.");
-    if (file.size > 10 * 1024 * 1024) throw new Error("Please choose an image smaller than 10 MB.");
+    if (!SUPPORTED_IMAGE_TYPES.has(file.type)) {
+      setMessage(UNSUPPORTED_IMAGE_MESSAGE);
+      if (fileInput.current) fileInput.current.value = "";
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setMessage("Please choose an image smaller than 10 MB.");
+      if (fileInput.current) fileInput.current.value = "";
+      return;
+    }
     setIsUploading(true);
     setMessage(null);
     setUploadAnalysis(null);
@@ -184,17 +194,17 @@ export default function CreateForm() {
     <section className="create-grid">
       <form className="create-workbench" onSubmit={(event) => { event.preventDefault(); void generateCaption(); }}>
         <fieldset><legend><span>01</span> CHOOSE A MOMENT</legend>
-          <input accept="image/*" className="sr-only" id="image-upload" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadFile(file); }} ref={fileInput} type="file" />
+          <input accept="image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif" className="sr-only" id="image-upload" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadFile(file); }} ref={fileInput} type="file" />
           <label className="upload-dropzone" htmlFor="image-upload" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const file = event.dataTransfer.files?.[0]; if (file) void uploadFile(file); }}><strong>{isUploading ? "Uploading…" : "DROP A MOMENT"}</strong><span>Drag an image here or choose from your files · JPG, PNG, WebP, GIF · up to 10 MB</span></label>
           {uploadAnalysis && selectedImage && <section className="upload-analysis" role="status"><p className="create-step"><span>02</span> AI UNDERSTANDS THE MOMENT</p>{uploadAnalysis.failed ? <><p>Couldn&apos;t analyze this moment right now.</p><small>You can still use it and add tags yourself.</small></> : <p>✨ AI UNDERSTANDS THIS MOMENT</p>}<div className="editable-tags">{selectedImage.tags.map((tag) => isEditingTags ? <button aria-label={`Remove ${tag}`} className="tag-pill tag-pill--removable" key={tag} onClick={() => void removeTag(tag)} type="button">{tag} <span>×</span></button> : <span className="tag-pill" key={tag}>{tag}</span>)}</div>{isEditingTags ? <div className="tag-editor"><label htmlFor="custom-tag">ADD A TAG</label><div><input id="custom-tag" maxLength={MAX_TAG_LENGTH} onChange={(event) => setTagDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void addTag(); } }} placeholder="type a tag..." value={tagDraft} /><button onClick={() => void addTag()} type="button">+ ADD</button></div><button className="finish-tags" onClick={() => setIsEditingTags(false)} type="button">DONE</button></div> : <button className="edit-tags" onClick={() => setIsEditingTags(true)} type="button">EDIT TAGS</button>}</section>}
           <label className="search-field" htmlFor="gallery-search"><span aria-hidden="true">⌕</span><input id="gallery-search" onChange={(event) => setQuery(event.target.value)} placeholder="Find a moment by mood, place, or vibe..." type="search" value={query} /></label>
           {usefulFilters.length > 0 && <div className="tag-filters" aria-label="Filter moments by tag">{usefulFilters.map((tag) => <button className={query === tag ? "is-selected" : ""} key={tag} onClick={() => setQuery(query === tag ? "" : tag)} type="button">{tag}</button>)}</div>}
-          <div className="gallery-grid" aria-live="polite">{filteredImages.map((image) => <button aria-label="Choose this moment" aria-pressed={selectedImage?.id === image.id} className={`gallery-card ${selectedImage?.id === image.id ? "is-selected" : ""}`} key={image.id} onClick={() => selectImage(image)} type="button"><img alt="" src={image.image_url} />{selectedImage?.id === image.id && <i aria-label="Selected">✓</i>}</button>)}{!isLoading && filteredImages.length === 0 && <p className="gallery-empty">No images match that mood yet.</p>}</div>
+          <div className="gallery-grid" aria-live="polite">{filteredImages.map((image) => <button aria-label="Choose this moment" aria-pressed={selectedImage?.id === image.id} className={`gallery-card ${selectedImage?.id === image.id ? "is-selected" : ""}`} key={image.id} onClick={() => selectImage(image)} type="button"><ImageWithFallback alt="Image unavailable" src={image.image_url} />{selectedImage?.id === image.id && <i aria-label="Selected">✓</i>}</button>)}{!isLoading && filteredImages.length === 0 && <p className="gallery-empty">No images match that mood yet.</p>}</div>
         </fieldset>
         <fieldset><legend><span>03</span> COOK IT <em>optional direction</em></legend><label className="sr-only" htmlFor="caption-instruction">Direction for the AI</label><textarea id="caption-instruction" maxLength={500} onChange={(event) => { setDirection(event.target.value); setCaption(null); }} placeholder="e.g. Make this funny for Columbia students, or make it extremely sarcastic." value={direction} /></fieldset>
         <button className="generate-button" disabled={!selectedImage || isGenerating} type="submit">{isGenerating ? "COOKING..." : caption ? "RECOOK" : "COOK IT"}<span aria-hidden="true">✦</span></button>
       </form>
-      <aside className="caption-preview" aria-live="polite"><p className="caption-preview__label">AI-GENERATED PREVIEW</p>{selectedImage ? <div className="preview-image"><img alt={selectedImage.title} src={selectedImage.image_url} />{caption && <p className="preview-image__caption">{caption}</p>}</div> : <div className="preview-image preview-image--empty">Drop a moment and let&apos;s make it unhinged.</div>}{caption ? <div className="caption-result"><p>Caption cooked. Nothing is published yet.</p><div><button disabled={isGenerating} onClick={() => void generateCaption()} type="button">↻ RECOOK</button><button className="publish-button" disabled={isPublishing} onClick={() => void publish()} type="button">{isPublishing ? "PUBLISHING..." : "PUBLISH"} <span aria-hidden="true">↗</span></button></div></div> : <div className="caption-empty"><span aria-hidden="true">✦</span><p>Your generated caption will appear here.</p></div>}{message && <p className="create-message" role="status">{message}</p>}</aside>
+      <aside className="caption-preview" aria-live="polite"><p className="caption-preview__label">AI-GENERATED PREVIEW</p>{selectedImage ? <div className="preview-image"><ImageWithFallback alt={selectedImage.title} src={selectedImage.image_url} />{caption && <p className="preview-image__caption">{caption}</p>}</div> : <div className="preview-image preview-image--empty">Drop a moment and let&apos;s make it unhinged.</div>}{caption ? <div className="caption-result"><p>Caption cooked. Nothing is published yet.</p><div><button disabled={isGenerating} onClick={() => void generateCaption()} type="button">↻ RECOOK</button><button className="publish-button" disabled={isPublishing} onClick={() => void publish()} type="button">{isPublishing ? "PUBLISHING..." : "PUBLISH"} <span aria-hidden="true">↗</span></button></div></div> : <div className="caption-empty"><span aria-hidden="true">✦</span><p>Your generated caption will appear here.</p></div>}{message && <p className="create-message" role="status">{message}</p>}</aside>
     </section>
   </main>;
 }
