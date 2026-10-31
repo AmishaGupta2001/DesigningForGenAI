@@ -1,3 +1,4 @@
+import type { GlossaryTerm } from "@/lib/glossary";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createSupabaseAdminClient, createSupabaseAnonClient } from "@/lib/supabase";
@@ -12,7 +13,7 @@ export default async function PostPage({ params }: PageProps<"/post/[id]">) {
   const { data, error } = await createSupabaseAnonClient().rpc("get_public_generation", { p_generation_id: id });
   if (error || !data?.[0]) notFound();
   const post = data[0] as Generation;
-  let matchedTerms = [];
+  let matchedTerms: GlossaryTerm[] = [];
   try {
     const { data: terms, error: termsError } = await createSupabaseAdminClient().from("terms").select("term,definition,category").eq("enabled", true).order("term").limit(100);
     if (termsError) throw termsError;
