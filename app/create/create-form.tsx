@@ -5,14 +5,62 @@ import { useRouter, useSearchParams } from "next/navigation";
 import NycUnhingedNav from "../nyc-unhinged-nav";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 import ImageWithFallback from "../components/ImageWithFallback";
+import GlossaryDisclosure from "../components/GlossaryDisclosure";
+import type { GlossaryTerm } from "@/lib/glossary";
 
 type ImageInput = { id: string; image_url: string; title: string; tags: string[] };
 type UploadAnalysis = { tags: string[]; failed: boolean };
 
 const COMMON_FILTERS = ["happy", "sad", "irritated", "surprised", "confused", "nyc", "subway", "food", "college"];
 const MAX_TAG_LENGTH = 32;
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
-const UNSUPPORTED_IMAGE_MESSAGE = "Please upload a JPG, PNG, WebP, or GIF.";
+const HEIC_IMAGE_TYPES = new Set(["image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence"]);
+const HEIC_EXTENSIONS = new Set(["heic", "heif"]);
+const UNSUPPORTED_IMAGE_MESSAGE = "Please upload a JPG, PNG, WebP, GIF, HEIC, or HEIF image.";
+
+function fileExtension(file: File) {
+  return file.name.split(".").pop()?.toLowerCase() || "";
+}
+
+function isHeicOrHeif(file: File) {
+  return HEIC_IMAGE_TYPES.has(file.type.toLowerCase()) || HEIC_EXTENSIONS.has(fileExtension(file));
+}
+
+function isSupportedImage(file: File) {
+  return SUPPORTED_IMAGE_TYPES.has(file.type) || isHeicOrHeif(file);
+}
+
+function readMatchedTerms(value: unknown): GlossaryTerm[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.flatMap((item): GlossaryTerm[] => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Record<string, unknown>;
+    if (typeof row.term !== "string" || !row.term.trim()) return [];
+
+    return [{
+      term: row.term.trim(),
+      definition: typeof row.definition === "string" ? row.definition.trim() || null : null,
+      category: typeof row.category === "string" ? row.category.trim() || null : null,
+    }];
+  });
+}
+
+async function convertHeicToJpeg(file: File) {
+  // heic2any uses browser APIs (a Web Worker, Canvas, and Blob), so importing it
+  // here keeps it out of the server/Vercel runtime and loads it only for HEIC uploads.
+  const { default: heic2any } = await import("heic2any");
+  const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 });
+  const jpeg = Array.isArray(converted) ? converted[0] : converted;
+
+  if (!jpeg || jpeg.type !== "image/jpeg") {
+    throw new Error("HEIC conversion did not produce a JPEG.");
+  }
+
+  const baseName = file.name.replace(/\.[^.]+$/, "") || "image";
+  return new File([jpeg], `${baseName}.jpg`, { type: "image/jpeg", lastModified: file.lastModified });
+}
 
 export default function CreateForm() {
   const router = useRouter();
@@ -26,6 +74,8 @@ export default function CreateForm() {
   const [tagDraft, setTagDraft] = useState("");
   const [direction, setDirection] = useState("");
   const [caption, setCaption] = useState<string | null>(null);
+  const [captionRequestId, setCaptionRequestId] = useState<string | null>(null);
+  const [matchedTerms, setMatchedTerms] = useState<GlossaryTerm[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -61,6 +111,8 @@ export default function CreateForm() {
   function selectImage(image: ImageInput) {
     setSelectedImage(image);
     setCaption(null);
+    setCaptionRequestId(null);
+    setMatchedTerms([]);
     setMessage(null);
     setUploadAnalysis(null);
     setIsEditingTags(false);
@@ -98,12 +150,12 @@ export default function CreateForm() {
   );
 
   async function uploadFile(file: File) {
-    if (!SUPPORTED_IMAGE_TYPES.has(file.type)) {
+    if (!isSupportedImage(file)) {
       setMessage(UNSUPPORTED_IMAGE_MESSAGE);
       if (fileInput.current) fileInput.current.value = "";
       return;
     }
-    if (file.size > 10 * 1024 * 1024) {
+    if (file.size > MAX_UPLOAD_BYTES) {
       setMessage("Please choose an image smaller than 10 MB.");
       if (fileInput.current) fileInput.current.value = "";
       return;
@@ -111,22 +163,38 @@ export default function CreateForm() {
     setIsUploading(true);
     setMessage(null);
     setUploadAnalysis(null);
+    setCaption(null);
+    setCaptionRequestId(null);
+    setMatchedTerms([]);
     try {
+      let uploadFile = file;
+      if (isHeicOrHeif(file)) {
+        try {
+          uploadFile = await convertHeicToJpeg(file);
+        } catch {
+          setMessage("We couldn’t convert that HEIC/HEIF image. Please export it as a JPEG and try again.");
+          return;
+        }
+      }
+      if (uploadFile.size > MAX_UPLOAD_BYTES) {
+        setMessage("The converted image is larger than 10 MB. Please choose a smaller image.");
+        return;
+      }
       const supabase = createSupabaseBrowserClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         router.push("/sign-in");
         return;
       }
-      const extension = file.name.split(".").pop()?.replace(/[^a-z0-9]/gi, "") || "jpg";
+      const extension = fileExtension(uploadFile).replace(/[^a-z0-9]/gi, "") || "jpg";
       const path = `${user.id}/${crypto.randomUUID()}.${extension}`;
-      const { error: storageError } = await supabase.storage.from("generation-images").upload(path, file, { contentType: file.type, upsert: false });
+      const { error: storageError } = await supabase.storage.from("generation-images").upload(path, uploadFile, { contentType: uploadFile.type, upsert: false });
       if (storageError) throw storageError;
       const { data: urlData } = supabase.storage.from("generation-images").getPublicUrl(path);
       let analysis: UploadAnalysis = { tags: [], failed: false };
       try {
         const formData = new FormData();
-        formData.append("image", file);
+        formData.append("image", uploadFile);
         const response = await fetch("/api/categorize-image", { method: "POST", body: formData });
         const result = await response.json() as { tags?: unknown };
         if (!response.ok || !Array.isArray(result.tags)) throw new Error("Image analysis failed.");
@@ -140,6 +208,7 @@ export default function CreateForm() {
       setImages((current) => [image, ...current]);
       setSelectedImage(image);
       setCaption(null);
+      setCaptionRequestId(null);
       setUploadAnalysis(analysis);
       setIsEditingTags(false);
     } catch {
@@ -154,11 +223,14 @@ export default function CreateForm() {
     if (!selectedImage) return;
     setIsGenerating(true);
     setMessage(null);
+    setMatchedTerms([]);
     try {
       const response = await fetch("/api/generate-caption", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ imageId: selectedImage.id, direction }) });
-      const result = await response.json() as { caption?: string; error?: string };
+      const result = await response.json() as { caption?: string; requestId?: string | null; matchedTerms?: unknown; error?: string };
       if (!response.ok || !result.caption) throw new Error(result.error || "Unable to generate a caption.");
       setCaption(result.caption);
+      setCaptionRequestId(result.requestId ?? null);
+      setMatchedTerms(readMatchedTerms(result.matchedTerms));
     } catch {
       setMessage("Unable to cook a caption right now. Please try again.");
     } finally {
@@ -177,8 +249,14 @@ export default function CreateForm() {
         router.push("/sign-in");
         return;
       }
-      const { error } = await supabase.from("generations").insert({ user_id: user.id, image_id: selectedImage.id, prompt: direction.trim(), caption, ...(remixOf ? { remix_of: remixOf } : {}) });
+      const { data: generation, error } = await supabase.from("generations").insert({ user_id: user.id, image_id: selectedImage.id, prompt: direction.trim(), caption, ...(remixOf ? { remix_of: remixOf } : {}) }).select("id").single();
       if (error) throw error;
+      if (captionRequestId) {
+        try {
+          const linkResponse = await fetch("/api/link-generation-request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requestId: captionRequestId, generationId: generation.id }) });
+          if (!linkResponse.ok) console.warn("Caption published, but its observability link was not saved.");
+        } catch (linkError) { console.warn("Caption published, but its observability link was not saved:", linkError); }
+      }
       router.push("/");
       router.refresh();
     } catch {
@@ -194,17 +272,42 @@ export default function CreateForm() {
     <section className="create-grid">
       <form className="create-workbench" onSubmit={(event) => { event.preventDefault(); void generateCaption(); }}>
         <fieldset><legend><span>01</span> CHOOSE A MOMENT</legend>
-          <input accept="image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif" className="sr-only" id="image-upload" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadFile(file); }} ref={fileInput} type="file" />
-          <label className="upload-dropzone" htmlFor="image-upload" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const file = event.dataTransfer.files?.[0]; if (file) void uploadFile(file); }}><strong>{isUploading ? "Uploading…" : "DROP A MOMENT"}</strong><span>Drag an image here or choose from your files · JPG, PNG, WebP, GIF · up to 10 MB</span></label>
+          <input accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.gif,.heic,.heif" className="sr-only" id="image-upload" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadFile(file); }} ref={fileInput} type="file" />
+          <label className="upload-dropzone" htmlFor="image-upload" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const file = event.dataTransfer.files?.[0]; if (file) void uploadFile(file); }}><strong>{isUploading ? "Uploading…" : "DROP A MOMENT"}</strong><span>Drag an image here or choose from your files · JPG, PNG, WebP, GIF, HEIC, or HEIF · up to 10 MB</span></label>
           {uploadAnalysis && selectedImage && <section className="upload-analysis" role="status"><p className="create-step"><span>02</span> AI UNDERSTANDS THE MOMENT</p>{uploadAnalysis.failed ? <><p>Couldn&apos;t analyze this moment right now.</p><small>You can still use it and add tags yourself.</small></> : <p>✨ AI UNDERSTANDS THIS MOMENT</p>}<div className="editable-tags">{selectedImage.tags.map((tag) => isEditingTags ? <button aria-label={`Remove ${tag}`} className="tag-pill tag-pill--removable" key={tag} onClick={() => void removeTag(tag)} type="button">{tag} <span>×</span></button> : <span className="tag-pill" key={tag}>{tag}</span>)}</div>{isEditingTags ? <div className="tag-editor"><label htmlFor="custom-tag">ADD A TAG</label><div><input id="custom-tag" maxLength={MAX_TAG_LENGTH} onChange={(event) => setTagDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void addTag(); } }} placeholder="type a tag..." value={tagDraft} /><button onClick={() => void addTag()} type="button">+ ADD</button></div><button className="finish-tags" onClick={() => setIsEditingTags(false)} type="button">DONE</button></div> : <button className="edit-tags" onClick={() => setIsEditingTags(true)} type="button">EDIT TAGS</button>}</section>}
           <label className="search-field" htmlFor="gallery-search"><span aria-hidden="true">⌕</span><input id="gallery-search" onChange={(event) => setQuery(event.target.value)} placeholder="Find a moment by mood, place, or vibe..." type="search" value={query} /></label>
           {usefulFilters.length > 0 && <div className="tag-filters" aria-label="Filter moments by tag">{usefulFilters.map((tag) => <button className={query === tag ? "is-selected" : ""} key={tag} onClick={() => setQuery(query === tag ? "" : tag)} type="button">{tag}</button>)}</div>}
           <div className="gallery-grid" aria-live="polite">{filteredImages.map((image) => <button aria-label="Choose this moment" aria-pressed={selectedImage?.id === image.id} className={`gallery-card ${selectedImage?.id === image.id ? "is-selected" : ""}`} key={image.id} onClick={() => selectImage(image)} type="button"><ImageWithFallback alt="Image unavailable" src={image.image_url} />{selectedImage?.id === image.id && <i aria-label="Selected">✓</i>}</button>)}{!isLoading && filteredImages.length === 0 && <p className="gallery-empty">No images match that mood yet.</p>}</div>
         </fieldset>
-        <fieldset><legend><span>03</span> COOK IT <em>optional direction</em></legend><label className="sr-only" htmlFor="caption-instruction">Direction for the AI</label><textarea id="caption-instruction" maxLength={500} onChange={(event) => { setDirection(event.target.value); setCaption(null); }} placeholder="e.g. Make this funny for Columbia students, or make it extremely sarcastic." value={direction} /></fieldset>
+        <fieldset><legend><span>03</span> COOK IT <em>optional direction</em></legend><label className="sr-only" htmlFor="caption-instruction">Direction for the AI</label><textarea id="caption-instruction" maxLength={500} onChange={(event) => { setDirection(event.target.value); setCaption(null); setMatchedTerms([]); }} placeholder="e.g. Make this funny for Columbia students, or make it extremely sarcastic." value={direction} /></fieldset>
         <button className="generate-button" disabled={!selectedImage || isGenerating} type="submit">{isGenerating ? "COOKING..." : caption ? "RECOOK" : "COOK IT"}<span aria-hidden="true">✦</span></button>
       </form>
-      <aside className="caption-preview" aria-live="polite"><p className="caption-preview__label">AI-GENERATED PREVIEW</p>{selectedImage ? <div className="preview-image"><ImageWithFallback alt={selectedImage.title} src={selectedImage.image_url} />{caption && <p className="preview-image__caption">{caption}</p>}</div> : <div className="preview-image preview-image--empty">Drop a moment and let&apos;s make it unhinged.</div>}{caption ? <div className="caption-result"><p>Caption cooked. Nothing is published yet.</p><div><button disabled={isGenerating} onClick={() => void generateCaption()} type="button">↻ RECOOK</button><button className="publish-button" disabled={isPublishing} onClick={() => void publish()} type="button">{isPublishing ? "PUBLISHING..." : "PUBLISH"} <span aria-hidden="true">↗</span></button></div></div> : <div className="caption-empty"><span aria-hidden="true">✦</span><p>Your generated caption will appear here.</p></div>}{message && <p className="create-message" role="status">{message}</p>}</aside>
+      <aside className="caption-preview" aria-live="polite">
+        <p className="caption-preview__label">AI-GENERATED PREVIEW</p>
+        {selectedImage ? (
+          <div className="preview-image">
+            <ImageWithFallback alt={selectedImage.title} src={selectedImage.image_url} />
+            {caption && <p className="preview-image__caption">{caption}</p>}
+          </div>
+        ) : (
+          <div className="preview-image preview-image--empty">Drop a moment and let&apos;s make it unhinged.</div>
+        )}
+        <GlossaryDisclosure terms={matchedTerms} />
+        {caption ? (
+          <div className="caption-result">
+            <p>Caption cooked. Nothing is published yet.</p>
+            <div>
+              <button disabled={isGenerating} onClick={() => void generateCaption()} type="button">↻ RECOOK</button>
+              <button className="publish-button" disabled={isPublishing} onClick={() => void publish()} type="button">
+                {isPublishing ? "PUBLISHING..." : "PUBLISH"} <span aria-hidden="true">↗</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="caption-empty"><span aria-hidden="true">✦</span><p>Your generated caption will appear here.</p></div>
+        )}
+        {message && <p className="create-message" role="status">{message}</p>}
+      </aside>
     </section>
   </main>;
 }

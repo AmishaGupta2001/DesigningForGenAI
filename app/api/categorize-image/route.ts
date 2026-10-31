@@ -36,6 +36,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Sign in to analyze an image." }, { status: 401 });
     }
 
+    const { data: signupAllowed, error: accessError } = await supabase.rpc("current_user_signup_allowed");
+    if (accessError) {
+      return NextResponse.json({ error: "Unable to verify application access." }, { status: 503 });
+    }
+    if (signupAllowed !== true) {
+      return NextResponse.json({ error: "You are not allowed to access this application." }, { status: 403 });
+    }
+
     const formData = await request.formData();
     const image = formData.get("image");
 

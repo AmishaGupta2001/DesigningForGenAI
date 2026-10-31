@@ -45,10 +45,31 @@ export async function GET(request: NextRequest) {
   const { error } = await supabase.auth.exchangeCodeForSession(code);
 
   if (error) {
+    // GoTrue can hide a rejected auth.users trigger behind its generic new-user
+    // database error. Route that account-creation failure to a helpful notice.
+    const errorText = `${error.message} ${(error as Error & { code?: string }).code ?? ""}`;
+    if (/WEEK7_SIGNUP_NOT_ALLOWED|signup is not allowed|42501|database error saving new user/i.test(errorText)) {
+      await supabase.auth.signOut();
+      response.headers.set(
+        "Location",
+        new URL("/sign-in?error=signup-not-allowed", request.url).toString(),
+      );
+      return response;
+    }
     return NextResponse.json(
       { error: "Unable to complete Google sign-in." },
       { status: 400 },
     );
+  }
+
+  const { data: signupAllowed, error: allowlistError } = await supabase.rpc("current_user_signup_allowed");
+  if (allowlistError || signupAllowed !== true) {
+    await supabase.auth.signOut();
+    response.headers.set(
+      "Location",
+      new URL(`/sign-in?error=${allowlistError ? "signup-check-unavailable" : "signup-not-allowed"}`, request.url).toString(),
+    );
+    return response;
   }
 
   return response;

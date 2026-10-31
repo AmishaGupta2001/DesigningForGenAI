@@ -7,7 +7,10 @@ export async function proxy(request: NextRequest) {
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!supabaseUrl || !supabaseAnonKey) {
-    return supabaseResponse;
+    const url = request.nextUrl.clone();
+    url.pathname = "/sign-in";
+    url.search = "?error=signup-check-unavailable";
+    return NextResponse.redirect(url);
   }
 
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
@@ -41,6 +44,19 @@ export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
   const isAuthenticated = Boolean(claims);
+
+  if (isAuthenticated) {
+    const { data: signupAllowed, error: allowlistError } = await supabase.rpc("current_user_signup_allowed");
+    if (allowlistError || signupAllowed !== true) {
+      await supabase.auth.signOut();
+      const url = request.nextUrl.clone();
+      url.pathname = "/sign-in";
+      url.search = `?error=${allowlistError ? "signup-check-unavailable" : "signup-not-allowed"}`;
+      const redirectResponse = NextResponse.redirect(url);
+      supabaseResponse.cookies.getAll().forEach((cookie) => redirectResponse.cookies.set(cookie));
+      return redirectResponse;
+    }
+  }
 
   const isRoot = pathname === "/";
   const isProtectedRoute =

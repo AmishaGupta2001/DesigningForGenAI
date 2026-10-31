@@ -1,7 +1,6 @@
 import { cookies } from "next/headers";
 import Link from "next/link";
 import {
-  createSupabaseAnonClient,
   createSupabaseServerClient,
   type Profile,
   type Recipe,
@@ -55,10 +54,10 @@ export default async function RecipesPage() {
   const currentProfile = profile as Profile | null;
   const needsProfileDetails = !currentProfile?.first_name || !currentProfile?.last_name;
 
-  const { data: recipes, error } = await createSupabaseAnonClient()
-    .from("recipes")
-    .select("id, name, cuisine, meal_type")
-    .order("name", { ascending: true });
+  const { data: recipes, error } = await supabase
+      .from("recipes")
+      .select("id, name, cuisine, meal_type")
+      .order("name", { ascending: true });
 
   if (error) {
     throw new Error("Unable to load recipes right now.");

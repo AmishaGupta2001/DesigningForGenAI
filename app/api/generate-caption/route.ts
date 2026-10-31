@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createSupabaseAdminClient, createSupabaseServerClient } from "@/lib/supabase";
+import { matchCaptionTerms, normalizeGlossaryTerms, type GlossaryTerm } from "@/lib/glossary";
 
 type CaptionRequest = { imageId?: unknown; direction?: unknown };
 type GeminiResult = { candidates?: Array<{ finishReason?: string; content?: { parts?: Array<{ text?: string }> } }>; usageMetadata?: Record<string, unknown>; error?: { message?: string } };
 type PromptMixRow = { chain_id: string; weight: number | string };
 type PromptChainRow = { id: string; name: string };
 type PromptStepRow = { id: string; chain_id: string; step_order: number; name: string; prompt_template: string };
-type PromptTermRow = { term: string; definition: string | null; category: string | null };
 type GenerationExampleRow = { input_prompt: string; expected_output: string };
 type ProviderRow = { id: string; provider_key: string; enabled: boolean };
 type ModelRow = { id: string; model_key: string; provider_id: string; enabled: boolean };
@@ -71,9 +71,10 @@ async function buildPrompt(supabase: ReturnType<typeof createSupabaseServerClien
     console.warn("Prompt chain configuration unavailable; using default prompt.", error);
   }
   let termsText = "";
+  let termRows: GlossaryTerm[] = [];
   try {
     const { data } = await supabase.from("terms").select("term,definition,category").eq("enabled", true).order("term").limit(100);
-    const termRows = (data ?? []) as PromptTermRow[];
+    termRows = normalizeGlossaryTerms(data);
     if (termRows.length) termsText = `\n\nApproved terminology:\n${termRows.map((item) => `- ${item.term}${item.category ? ` (${item.category})` : ""}${item.definition ? `: ${item.definition}` : ""}`).join("\n")}`;
   } catch { /* The base caption flow remains available if configuration reads fail. */ }
   let examplesText = "";
@@ -84,7 +85,7 @@ async function buildPrompt(supabase: ReturnType<typeof createSupabaseServerClien
     const exampleRows = (data ?? []) as GenerationExampleRow[];
     if (exampleRows.length) examplesText = `\n\nReference examples (style guidance only):\n${exampleRows.map((item, i) => `Example ${i + 1}\nInput: ${item.input_prompt}\nExpected style/output: ${item.expected_output}`).join("\n\n")}`;
   } catch { /* Examples are optional and never block captioning. */ }
-  return { prompt: `${BASE_PROMPT}${chainInstructions}${termsText}${examplesText}\n\nCreative direction:\n${values.direction}`, chainId };
+  return { prompt: `${BASE_PROMPT}${chainInstructions}${termsText}${examplesText}\n\nCreative direction:\n${values.direction}`, chainId, terms: termRows };
 }
 
 export async function POST(request: Request) {
@@ -121,6 +122,9 @@ export async function POST(request: Request) {
     supabase = createSupabaseServerClient(await cookies());
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "You must be signed in to generate a caption." }, { status: 401 });
+    const { data: signupAllowed, error: accessError } = await supabase.rpc("current_user_signup_allowed");
+    if (accessError) return NextResponse.json({ error: "Unable to verify application access." }, { status: 503 });
+    if (signupAllowed !== true) return NextResponse.json({ error: "You are not allowed to access this application." }, { status: 403 });
     try { observabilityAdmin = createSupabaseAdminClient(); }
     catch (error) { console.warn("Generation observability is unavailable; captioning will continue.", error); }
     const { data: image, error: imageError } = await supabase.from("images").select("image_url,title,tags").eq("id", imageId).maybeSingle();
@@ -140,7 +144,7 @@ export async function POST(request: Request) {
     const selectedModel = provider?.enabled ? modelRows.find((model) => model.provider_id === provider.id) : null;
     modelId = selectedModel?.id ?? null;
     const model = selectedModel ? selectedModel.model_key : process.env.GEMINI_MODEL || "gemini-3.8-flash";
-    const { prompt, chainId } = await buildPrompt(supabase, direction, { title: image.title ?? "", tags: image.tags ?? [] });
+    const { prompt, chainId, terms } = await buildPrompt(supabase, direction, { title: image.title ?? "", tags: image.tags ?? [] });
     requestContent = { model, image_id: imageId, direction, prompt, prompt_chain_id: chainId };
 
     if (observabilityAdmin) {
@@ -208,7 +212,13 @@ export async function POST(request: Request) {
       }
       await recordResponse("succeeded", safeResponse, null, latencyMs);
       await finishRequest("succeeded");
-      return NextResponse.json({ caption, requestId });
+      let matchedTerms: GlossaryTerm[] = [];
+      try {
+        matchedTerms = matchCaptionTerms(caption, terms);
+      } catch (error) {
+        console.warn("Could not match glossary terms; returning the caption without context.", error);
+      }
+      return NextResponse.json({ caption, requestId, matchedTerms });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Gemini request failed.";
       await recordResponse("failed", llmResult, message, Date.now() - llmStartedAt);

@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
 const stars = [
     { top: "12%", left: "15%", delay: "0s" },
@@ -12,13 +12,15 @@ const stars = [
 ];
 
 export default function ShootingStars() {
-    const [reducedMotion, setReducedMotion] = useState(false);
-
-    useEffect(() => {
-        setReducedMotion(
-            window.matchMedia("(prefers-reduced-motion: reduce)").matches
-        );
-    }, []);
+    const reducedMotion = useSyncExternalStore(
+        (onChange) => {
+            const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+            query.addEventListener("change", onChange);
+            return () => query.removeEventListener("change", onChange);
+        },
+        () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+        () => false,
+    );
 
     if (reducedMotion) return null;
 

@@ -1,0 +1,2 @@
+# Local Supabase CLI project identity only. This does not link or target a remote project.
+project_id = "designingforgenai"

@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import GoogleSignIn from "../recipes/google-sign-in";
 import ShootingStars from "../components/ShootingStars";
+import SignupNotice from "./signup-notice";
 
 export const metadata = {
   title: "Sign in | NYC Unhinged",
@@ -17,9 +19,10 @@ export default function SignInPage() {
       </Link>
       <section className="unhinged-auth" aria-labelledby="sign-in-title">
         <span className="unhinged-auth__sticker" aria-hidden="true">Spill the tea ☕</span>
-        <p className="unhinged-kicker"><span aria-hidden="true">✦</span> YOUR SCREEN TIME CALLED. IT'S CONCERNED.</p>
+        <p className="unhinged-kicker"><span aria-hidden="true">✦</span> YOUR SCREEN TIME CALLED. IT&apos;S CONCERNED.</p>
         <h1 id="sign-in-title">Get unhinged with NYC.</h1>
         <p>Sign in to turn your daily NYC trauma into community entertainment. At least someone should get a laugh out of it.</p>
+        <Suspense fallback={null}><SignupNotice /></Suspense>
         <GoogleSignIn />
 
       </section>
