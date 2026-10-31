@@ -8,7 +8,11 @@ type GeminiResult = { candidates?: Array<{ finishReason?: string; content?: { pa
 type PromptMixRow = { chain_id: string; weight: number | string };
 type PromptChainRow = { id: string; name: string };
 type PromptStepRow = { id: string; chain_id: string; step_order: number; name: string; prompt_template: string };
-type GenerationExampleRow = { input_prompt: string; expected_output: string };
+type GenerationExampleRow = {
+  input_prompt: string;
+  expected_output: string;
+  input_data: Record<string, unknown> | null;
+};
 type ProviderRow = { id: string; provider_key: string; enabled: boolean };
 type ModelRow = { id: string; model_key: string; provider_id: string; enabled: boolean };
 const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
@@ -36,7 +40,62 @@ function getMimeType(contentType: string | null, imageUrl: string) {
   if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
   return null;
 }
+async function loadExampleImages(
+    examples: GenerationExampleRow[],
+    supabaseAdmin: ReturnType<typeof createSupabaseAdminClient>
+) {
+  const mimeTypes: Record<string, string> = {
+    jpg: "image/jpeg",
+    png: "image/png",
+    webp: "image/webp",
+    gif: "image/gif",
+  };
 
+  const results: Array<{
+    caption: string;
+    mimeType: string;
+    base64: string;
+  }> = [];
+
+  for (const example of examples) {
+    const imagePath = example.input_data?.image_path;
+
+    if (
+        typeof imagePath !== "string" ||
+        !/^examples\/[0-9a-f-]{36}\.(jpg|png|webp|gif)$/i.test(imagePath)
+    ) {
+      continue;
+    }
+
+    const extension = imagePath.split(".").pop()?.toLowerCase() ?? "";
+    const mimeType = mimeTypes[extension];
+
+    if (!mimeType) continue;
+
+    try {
+      const { data, error } = await supabaseAdmin.storage
+          .from("ai-generation-examples")
+          .download(imagePath);
+
+      if (error || !data || data.size > 2 * 1024 * 1024) {
+        console.warn("Could not load AI generation example image:", imagePath);
+        continue;
+      }
+
+      const base64 = Buffer.from(await data.arrayBuffer()).toString("base64");
+
+      results.push({
+        caption: example.expected_output,
+        mimeType,
+        base64,
+      });
+    } catch (error) {
+      console.warn("Could not load AI generation example image:", error);
+    }
+  }
+
+  return results;
+}
 function fillTemplate(template: string, values: Record<string, string>) {
   return template.replace(/\{\{\s*([a-z_]+)\s*\}\}/gi, (_match, key: string) => values[key.toLowerCase()] ?? "");
 }
@@ -78,14 +137,40 @@ async function buildPrompt(supabase: ReturnType<typeof createSupabaseServerClien
     if (termRows.length) termsText = `\n\nApproved terminology:\n${termRows.map((item) => `- ${item.term}${item.category ? ` (${item.category})` : ""}${item.definition ? `: ${item.definition}` : ""}`).join("\n")}`;
   } catch { /* The base caption flow remains available if configuration reads fail. */ }
   let examplesText = "";
+  let exampleRows: GenerationExampleRow[] = [];
+
   try {
-    let query = supabase.from("ai_generation_examples").select("input_prompt,expected_output").eq("enabled", true);
+    let query = supabase.from("ai_generation_examples").select("input_prompt,expected_output,input_data").eq("enabled", true);
     query = chainId ? query.or(`prompt_chain_id.is.null,prompt_chain_id.eq.${chainId}`) : query.is("prompt_chain_id", null);
     const { data } = await query.order("created_at", { ascending: false }).limit(3);
-    const exampleRows = (data ?? []) as GenerationExampleRow[];
+    exampleRows = (data ?? []) as GenerationExampleRow[];
     if (exampleRows.length) examplesText = `\n\nReference examples (style guidance only):\n${exampleRows.map((item, i) => `Example ${i + 1}\nInput: ${item.input_prompt}\nExpected style/output: ${item.expected_output}`).join("\n\n")}`;
   } catch { /* Examples are optional and never block captioning. */ }
-  return { prompt: `${BASE_PROMPT}${chainInstructions}${termsText}${examplesText}\n\nCreative direction:\n${values.direction}`, chainId, terms: termRows };
+  return {
+    prompt: `${BASE_PROMPT}${chainInstructions}${termsText}${examplesText}
+
+Reference examples are provided to teach you HUMOUR STYLE, not image content.
+
+For each reference:
+- Understand what is actually shown in the reference image.
+- Understand why its caption is funny.
+- Identify its humour style, tone, structure, and comedic technique.
+
+IMPORTANT:
+- The target image is the ONLY image you should write a caption about.
+- Never transfer people, objects, locations, events, or situations from reference images into the target caption.
+- Never invent a scenario that is not supported by the target image.
+- If the target image is identical to a reference image, use the reference caption's humour approach to create a fresh variation.
+- Preserve the target image's actual context.
+
+Write one original, funny caption that fits the target image.
+
+Creative direction:
+${values.direction}`,
+    chainId,
+    terms: termRows,
+    examples: exampleRows
+  };
 }
 
 export async function POST(request: Request) {
@@ -144,7 +229,11 @@ export async function POST(request: Request) {
     const selectedModel = provider?.enabled ? modelRows.find((model) => model.provider_id === provider.id) : null;
     modelId = selectedModel?.id ?? null;
     const model = selectedModel ? selectedModel.model_key : process.env.GEMINI_MODEL || "gemini-3.8-flash";
-    const { prompt, chainId, terms } = await buildPrompt(supabase, direction, { title: image.title ?? "", tags: image.tags ?? [] });
+    const { prompt, chainId, terms, examples } = await buildPrompt(
+        supabase,
+        direction,
+        { title: image.title ?? "", tags: image.tags ?? [] }
+    );
     requestContent = { model, image_id: imageId, direction, prompt, prompt_chain_id: chainId };
 
     if (observabilityAdmin) {
@@ -183,6 +272,10 @@ export async function POST(request: Request) {
       await finishRequest("failed", "Unsupported image format.");
       return NextResponse.json({ error: "This image format cannot be captioned. Please upload it again so it can be converted to JPEG." }, { status: 415 });
     }
+    const exampleImages = await loadExampleImages(
+        examples,
+        createSupabaseAdminClient()
+    );
 
     const llmStartedAt = Date.now();
     let llmResult: GeminiResult | null = null;
@@ -191,8 +284,40 @@ export async function POST(request: Request) {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: imageBase64 } }] }],
-          generationConfig: { temperature: 1, maxOutputTokens: 300, thinkingConfig: { thinkingLevel: "low" } },
+          contents: [
+            {
+              parts: [
+                { text: prompt },
+
+                ...exampleImages.flatMap((example, index) => [
+                  {
+                    text: `Reference example ${index + 1}. Its caption is: ${example.caption}. Use this image-caption pair only as style guidance.`,
+                  },
+                  {
+                    inline_data: {
+                      mime_type: example.mimeType,
+                      data: example.base64,
+                    },
+                  },
+                ]),
+
+                {
+                  text: "Now write a completely new caption for this target image:",
+                },
+                {
+                  inline_data: {
+                    mime_type: mimeType,
+                    data: imageBase64,
+                  },
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 1,
+            maxOutputTokens: 300,
+            thinkingConfig: { thinkingLevel: "low" },
+          },
         }),
       });
       llmResult = await response.json().catch(() => null) as GeminiResult | null;
